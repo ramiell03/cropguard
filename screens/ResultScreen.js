@@ -7,6 +7,7 @@ import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
+const API_BASE_URL = 'http://172.20.10.3:8000'; // Add your API base URL
 
 const ResultScreen = ({ route, navigation }) => {
   const { analysisResult, sceneInfo } = route.params;
@@ -19,48 +20,6 @@ const ResultScreen = ({ route, navigation }) => {
       case 'low': return '#43a047';
       default: return '#757575';
     }
-  };
-
-  // Get recommendations based on the analysis result
-  const getRecommendations = () => {
-    if (!analysisResult?.prediction) return [];
-    
-    const disease = analysisResult.prediction.class.toLowerCase();
-    const isHealthy = analysisResult.prediction.is_healthy;
-    
-    if (isHealthy) {
-      return [
-        "Your crops appear healthy. Maintain current practices.",
-        "Continue regular monitoring for early detection.",
-        "Ensure proper irrigation and fertilization."
-      ];
-    }
-    
-    // Disease-specific recommendations
-    const recommendations = {
-      "maize leafblight": [
-        "Apply fungicides containing chlorothalonil or mancozeb.",
-        "Remove and destroy infected plant debris.",
-        "Rotate crops with non-host species for 2-3 years."
-      ],
-      "maize rust": [
-        "Apply fungicides at first sign of disease.",
-        "Plant resistant varieties if available.",
-        "Avoid overhead irrigation to reduce leaf wetness."
-      ],
-      "gray leaf spot": [
-        "Use fungicide treatments in high-risk areas.",
-        "Implement crop rotation with non-grass crops.",
-        "Space plants adequately for better air circulation."
-      ],
-      // Add more disease-specific recommendations as needed
-    };
-    
-    return recommendations[disease] || [
-      "Isolate affected plants to prevent spread.",
-      "Consult with agricultural extension services.",
-      "Consider soil testing for nutrient imbalances."
-    ];
   };
 
   return (
@@ -85,13 +44,20 @@ const ResultScreen = ({ route, navigation }) => {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Satellite Scene Analyzed</Text>
         <View style={styles.sceneInfo}>
-          <Image 
-            source={{ uri: sceneInfo.thumbnail }} 
-            style={styles.sceneThumbnail}
-          />
+          {sceneInfo.thumbnail && (
+            <Image 
+              source={{ uri: sceneInfo.thumbnail }} 
+              style={styles.sceneThumbnail}
+            />
+          )}
           <View style={styles.sceneDetails}>
             <Text style={styles.sceneName}>{sceneInfo.displayId}</Text>
             <Text style={styles.sceneDate}>{sceneInfo.date}</Text>
+            {sceneInfo.filePath && (
+              <Text style={styles.sceneFile}>
+                File: {sceneInfo.filePath.split('/').pop()}
+              </Text>
+            )}
           </View>
         </View>
       </View>
@@ -182,74 +148,65 @@ const ResultScreen = ({ route, navigation }) => {
         </View>
       )}
 
-      {/* Recommendations */}
+      {/* Recommendations from API */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Recommendations</Text>
         <View style={styles.recommendations}>
-          {getRecommendations().map((rec, index) => (
-            <View key={index} style={styles.recommendationItem}>
-              <FontAwesome 
-                name={analysisResult.prediction.is_healthy ? "check-circle" : "exclamation-triangle"} 
-                size={16} 
-                color={analysisResult.prediction.is_healthy ? "#43a047" : "#fb8c00"} 
-              />
-              <Text style={styles.recommendationText}>{rec}</Text>
+          {analysisResult.recommendations && analysisResult.recommendations.length > 0 ? (
+            analysisResult.recommendations.map((rec, index) => (
+              <View key={index} style={styles.recommendationItem}>
+                <FontAwesome 
+                  name={analysisResult.prediction.is_healthy ? "check-circle" : "exclamation-triangle"} 
+                  size={16} 
+                  color={analysisResult.prediction.is_healthy ? "#43a047" : "#fb8c00"} 
+                />
+                <Text style={styles.recommendationText}>{rec}</Text>
+              </View>
+            ))
+          ) : (
+            <View style={styles.recommendationItem}>
+              <FontAwesome name="info-circle" size={16} color="#757575" />
+              <Text style={styles.recommendationText}>No specific recommendations.</Text>
             </View>
-          ))}
+          )}
         </View>
       </View>
 
-      {/* New analysis button */}
-      <TouchableOpacity 
-        style={styles.newAnalysisButton}
-        onPress={() => navigation.goBack()}
-      >
-        <Text style={styles.newAnalysisText}>Perform New Analysis</Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 };
 
+// STYLES
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f4faf4',
   },
   header: {
-    paddingVertical: 20,
-    paddingHorizontal: 16,
+    height: 60,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
   backButton: {
-    marginRight: 16,
+    marginRight: 12,
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '600',
     color: '#fff',
+    fontWeight: 'bold',
   },
   section: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    margin: 16,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    borderBottomWidth: 1,
+    borderColor: '#e0e0e0',
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#2e8b57',
-    marginBottom: 12,
+    fontWeight: 'bold',
+    color: '#1a5f23',
+    marginBottom: 10,
   },
   sceneInfo: {
     flexDirection: 'row',
@@ -266,41 +223,42 @@ const styles = StyleSheet.create({
   },
   sceneName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: 'bold',
+    color: '#2e8b57',
   },
   sceneDate: {
     fontSize: 14,
     color: '#666',
+  },
+  sceneFile: {
+    fontSize: 12,
+    color: '#999',
     marginTop: 4,
   },
   predictionCard: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+    backgroundColor: '#fff',
     padding: 16,
+    borderRadius: 12,
+    elevation: 2,
   },
   predictionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
   },
   predictionLabel: {
     fontSize: 16,
-    color: '#555',
-    fontWeight: '500',
+    color: '#444',
   },
   predictionValue: {
     fontSize: 16,
-    fontWeight: '600',
-    textTransform: 'capitalize',
+    fontWeight: 'bold',
   },
   confidenceMeter: {
-    marginBottom: 16,
+    marginTop: 12,
   },
   meterLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
   },
   meterLabel: {
     fontSize: 14,
@@ -308,107 +266,87 @@ const styles = StyleSheet.create({
   },
   meterValue: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: 'bold',
   },
   meterBar: {
-    height: 10,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 5,
+    height: 8,
+    backgroundColor: '#eee',
+    borderRadius: 4,
+    marginTop: 4,
     overflow: 'hidden',
   },
   meterFill: {
-    height: '100%',
-    borderRadius: 5,
+    height: 8,
+    borderRadius: 4,
   },
   severityBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: '#f5f5f5',
+    marginTop: 12,
   },
   severityText: {
     fontSize: 14,
-    color: '#555',
+    color: '#444',
   },
   severityValue: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: 'bold',
     textTransform: 'capitalize',
   },
   indicesGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   indexCard: {
-    width: '100%',
-    backgroundColor: '#f0f7f4',
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    width: (width - 48) / 2,
+    marginBottom: 16,
     padding: 12,
-    marginBottom: 12,
+    borderRadius: 10,
+    elevation: 1,
   },
   indexName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#2e8b57',
-    marginBottom: 4,
   },
   indexValue: {
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 16,
     color: '#333',
-    marginBottom: 4,
+    marginVertical: 4,
   },
   indexRange: {
     fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
+    color: '#777',
   },
   indexDescription: {
     fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
+    color: '#888',
+    marginTop: 4,
   },
   visualizationImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 8,
+    height: 300,
+    borderRadius: 10,
+    marginTop: 8,
   },
   recommendations: {
-    marginTop: 8,
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 10,
   },
   recommendationItem: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
+    alignItems: 'center',
+    marginBottom: 8,
   },
   recommendationText: {
-    marginLeft: 8,
     fontSize: 14,
-    color: '#333',
+    marginLeft: 8,
+    color: '#444',
     flex: 1,
-  },
-  newAnalysisButton: {
-    backgroundColor: '#2e8b57',
-    borderRadius: 8,
-    padding: 16,
-    margin: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  newAnalysisText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    flexWrap: 'wrap',
   },
 });
 

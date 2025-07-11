@@ -1,158 +1,286 @@
-import React, { useEffect, useState, useContext } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, Dimensions } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useState, useEffect, useContext } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  TouchableOpacity, 
+  ActivityIndicator,
+  Alert,
+  Platform,
+  PermissionsAndroid
+} from 'react-native';
 import { ThemeContext } from '../theme/ThemeContext';
-import { MaterialIcons } from '@expo/vector-icons'; // Make sure to install expo vector icons
+import { MaterialIcons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
-const ReportsScreen = () => {
+const ReportsScreen = ({ navigation, route }) => {
   const { theme } = useContext(ThemeContext);
   const [reports, setReports] = useState([]);
-  const { width } = Dimensions.get('window');
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
 
-  useEffect(() => {
-    const unsubscribe = fetchReports();
-    return () => unsubscribe;
-  }, []);
+  // Initialize reports directory if it doesn't exist
+  const initReportsDirectory = async () => {
+    const reportsDir = `${FileSystem.documentDirectory}reports/`;
+    const dirInfo = await FileSystem.getInfoAsync(reportsDir);
+    
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(reportsDir, { intermediates: true });
+    }
+    return reportsDir;
+  };
 
-  const fetchReports = async () => {
+  // Load existing reports
+  const loadExistingReports = async () => {
     try {
-      const storedReports = await AsyncStorage.getItem('maizeReports');
-      if (storedReports) {
-        setReports(JSON.parse(storedReports));
-      }
+      const reportsDir = await initReportsDirectory();
+      const files = await FileSystem.readDirectoryAsync(reportsDir);
+      return files.filter(file => file.endsWith('.pdf'))
+                 .sort((a, b) => b.localeCompare(a)); // Newest first
     } catch (error) {
-      console.log('Failed to load reports', error);
+      console.error('Error loading reports:', error);
+      return [];
     }
   };
 
-  const deleteReport = (id) => {
-    Alert.alert(
-      'Delete Report', 
-      'Are you sure you want to delete this report?',
-      [
-        { 
-          text: 'Cancel', 
-          style: 'cancel',
-          onPress: () => console.log('Cancel Pressed')
-        },
-        { 
-          text: 'Delete', 
-          style: 'destructive', 
-          onPress: () => removeReport(id) 
-        },
-      ],
-      { cancelable: true }
-    );
+  // Generate PDF report from scan data
+  const generatePdfReport = async (scanData) => {
+    try {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Crop Analysis Report</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              .header { text-align: center; margin-bottom: 20px; }
+              .title { font-size: 24px; color: #2e7d32; margin-bottom: 5px; }
+              .subtitle { font-size: 14px; color: #666; margin-bottom: 20px; }
+              .section { margin-bottom: 15px; }
+              .section-title { font-size: 18px; color: #2e7d32; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+              .row { display: flex; margin-bottom: 8px; }
+              .label { font-weight: bold; width: 150px; }
+              .value { flex: 1; }
+              .footer { margin-top: 30px; font-size: 12px; color: #999; text-align: center; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div class="title">Crop Analysis Report</div>
+              <div class="subtitle">Generated on ${new Date().toLocaleString()}</div>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Scan Details</div>
+              <div class="row">
+                <div class="label">Scan ID:</div>
+                <div class="value">${scanData.id || 'N/A'}</div>
+              </div>
+              <div class="row">
+                <div class="label">Date:</div>
+                <div class="value">${scanData.timestamp ? new Date(scanData.timestamp).toLocaleString() : 'N/A'}</div>
+              </div>
+              <div class="row">
+                <div class="label">Result:</div>
+                <div class="value">${scanData.result || 'N/A'}</div>
+              </div>
+              <div class="row">
+                <div class="label">Confidence:</div>
+                <div class="value">${scanData.confidence ? `${scanData.confidence}%` : 'N/A'}</div>
+              </div>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Vegetation Indices</div>
+              <div class="row">
+                <div class="label">NDVI:</div>
+                <div class="value">${scanData.ndvi || 'N/A'}</div>
+              </div>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Recommendations</div>
+              <p>${scanData.advice || 'No specific recommendations available.'}</p>
+            </div>
+            
+            <div class="footer">
+              <p>Generated by Maize Monitor App</p>
+              <p>© ${new Date().getFullYear()} All rights reserved</p>
+            </div>
+          </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html });
+      const reportsDir = await initReportsDirectory();
+      const fileName = `report_${scanData.id || Date.now()}_${Date.now()}.pdf`;
+      const newPath = `${reportsDir}${fileName}`;
+      
+      await FileSystem.copyAsync({ from: uri, to: newPath });
+      return fileName;
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      throw error;
+    }
   };
 
-  const removeReport = async (id) => {
+  // Process incoming scan data
+  const processScanData = async (scanData) => {
+    if (!scanData) return;
+    
     try {
-      const filteredReports = reports.filter((report) => report.id !== id);
-      setReports(filteredReports);
-      await AsyncStorage.setItem('maizeReports', JSON.stringify(filteredReports));
+      setGenerating(true);
+      const fileName = await generatePdfReport(scanData);
+      setReports(prev => [fileName, ...prev]);
     } catch (error) {
-      console.log('Failed to delete report', error);
+      Alert.alert('Error', 'Failed to generate report');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Initial load and scan data processing
+  useEffect(() => {
+    const initialize = async () => {
+      setLoading(true);
+      try {
+        const existingReports = await loadExistingReports();
+        setReports(existingReports);
+        await processScanData(route.params?.scanData);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to load reports');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initialize();
+  }, [route.params?.scanData]);
+
+  // Request Android storage permissions
+  const requestStoragePermission = async () => {
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+        {
+          title: "Storage Permission",
+          message: "App needs access to storage to share files",
+          buttonPositive: "OK"
+        }
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (err) {
+      console.warn(err);
+      return false;
+    }
+  };
+
+  // Share report file
+  const shareReport = async (fileName) => {
+    try {
+      const fileUri = `${FileSystem.documentDirectory}reports/${fileName}`;
+      
+      if (Platform.OS === 'android') {
+        const hasPermission = await requestStoragePermission();
+        if (!hasPermission) {
+          Alert.alert('Permission required', 'Need storage permission to share files');
+          return;
+        }
+      }
+      
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Share Report',
+        UTI: 'com.adobe.pdf'
+      });
+    } catch (error) {
+      console.error('Error sharing report:', error);
+      Alert.alert('Error', 'Failed to share report');
+    }
+  };
+
+  // Delete report file
+  const deleteReport = async (fileName) => {
+    try {
+      await FileSystem.deleteAsync(`${FileSystem.documentDirectory}reports/${fileName}`);
+      setReports(prev => prev.filter(file => file !== fileName));
+      Alert.alert('Success', 'Report deleted successfully');
+    } catch (error) {
+      console.error('Error deleting report:', error);
       Alert.alert('Error', 'Failed to delete report');
     }
   };
 
-  const renderItem = ({ item }) => (
-    <View style={[
-      styles.reportItem, 
-      { 
-        backgroundColor: theme.cardBackground || '#fff',
-        shadowColor: theme.shadow,
-        width: width * 0.9,
-      }
-    ]}>
-      <View style={styles.reportHeader}>
-        <MaterialIcons 
-          name="description" 
-          size={24} 
-          color={theme.primary} 
-          style={styles.reportIcon}
-        />
-        <Text style={[styles.date, { color: theme.text }]}>
-          {item.date}
-        </Text>
+  // Render individual report item
+  const renderItem = ({ item }) => {
+    const dateFromFilename = parseInt(item.split('_')[2].replace('.pdf', ''));
+    const reportDate = new Date(isNaN(dateFromFilename) ? Date.now() : dateFromFilename);
+    
+    return (
+      <View style={[styles.reportCard, { backgroundColor: theme.cardBackground }]}>
+        <MaterialIcons name="picture-as-pdf" size={24} color="#e53935" />
+        <View style={styles.reportInfo}>
+          <Text style={[styles.reportTitle, { color: theme.text }]} numberOfLines={1}>
+            {item.split('_')[0]}_${item.split('_')[1]}
+          </Text>
+          <Text style={[styles.reportDate, { color: theme.secondaryText }]}>
+            {reportDate.toLocaleString()}
+          </Text>
+        </View>
+        <View style={styles.reportActions}>
+          <TouchableOpacity onPress={() => shareReport(item)}>
+            <MaterialIcons name="share" size={24} color={theme.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => deleteReport(item)}>
+            <MaterialIcons name="delete" size={24} color={theme.danger} />
+          </TouchableOpacity>
+        </View>
       </View>
-      
-      <View style={styles.reportContent}>
-        <Text style={[styles.content, { color: theme.text }]}>
-          {item.content}
-        </Text>
-      </View>
-      
-      <View style={styles.statusContainer}>
-        {item.status && (
-          <View style={[
-            styles.statusBadge,
-            { 
-              backgroundColor: getStatusColor(item.status, theme),
-            }
-          ]}>
-            <Text style={styles.statusText}>
-              {item.status.toUpperCase()}
-            </Text>
-          </View>
-        )}
-      </View>
-      
-      <TouchableOpacity
-        style={[
-          styles.deleteButton, 
-          { 
-            backgroundColor: theme.danger || '#e55353',
-          }
-        ]}
-        onPress={() => deleteReport(item.id)}
-      >
-        <MaterialIcons name="delete" size={18} color="#fff" />
-        <Text style={styles.deleteButtonText}>
-          Delete
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const getStatusColor = (status, theme) => {
-    const statusColors = {
-      healthy: theme.success || '#4CAF50',
-      moderate: theme.warning || '#FFC107',
-      severe: theme.danger || '#F44336',
-      high: theme.primary || '#2196F3',
-    };
-    return statusColors[status.toLowerCase()] || theme.primary;
+    );
   };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <Text style={[styles.screenTitle, { color: theme.text }]}>
-        Your Reports
-      </Text>
-      
-      {reports.length === 0 ? (
-        <View style={styles.emptyState}>
-          <MaterialIcons 
-            name="find-in-page" 
-            size={60} 
-            color={theme.secondaryText} 
-          />
-          <Text style={[styles.noReports, { color: theme.secondaryText }]}>
-            No saved reports yet
-          </Text>
-          <Text style={[styles.noReportsSubtext, { color: theme.secondaryText }]}>
-            Scan a field to generate your first report
+      <View style={styles.header}>
+        <Text style={[styles.title, { color: theme.text }]}>Generated Reports</Text>
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()}
+          style={styles.closeButton}
+        >
+          <MaterialIcons name="close" size={24} color={theme.text} />
+        </TouchableOpacity>
+      </View>
+
+      {generating && (
+        <View style={styles.generatingContainer}>
+          <ActivityIndicator size="small" color={theme.primary} />
+          <Text style={[styles.generatingText, { color: theme.text }]}>Generating report...</Text>
+        </View>
+      )}
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.text }]}>Loading reports...</Text>
+        </View>
+      ) : reports.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <MaterialIcons name="folder-open" size={60} color={theme.secondaryText} />
+          <Text style={[styles.emptyText, { color: theme.text }]}>No reports available</Text>
+          <Text style={[styles.emptySubtext, { color: theme.secondaryText }]}>
+            Scan results will automatically generate reports
           </Text>
         </View>
       ) : (
         <FlatList
           data={reports}
-          keyExtractor={(item) => item.id.toString()}
           renderItem={renderItem}
+          keyExtractor={(item) => item}
           contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={<View style={{ height: 10 }} />}
         />
       )}
     </View>
@@ -162,89 +290,89 @@ const ReportsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    padding: 16,
   },
-  screenTitle: {
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 20,
-    marginTop: 10,
   },
-  reportItem: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    elevation: 2,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+  closeButton: {
+    padding: 8,
   },
-  reportHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  reportIcon: {
-    marginRight: 10,
-  },
-  date: {
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  reportContent: {
-    marginBottom: 12,
-  },
-  content: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  statusContainer: {
-    marginBottom: 15,
-  },
-  statusBadge: {
-    alignSelf: 'flex-start',
-    borderRadius: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  deleteButton: {
+  generatingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: 10,
+    backgroundColor: 'rgba(0,0,0,0.05)',
     borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignSelf: 'flex-end',
+    marginBottom: 10,
   },
-  deleteButtonText: {
-    color: '#fff',
-    fontWeight: '600',
+  generatingText: {
+    marginLeft: 10,
     fontSize: 14,
-    marginLeft: 5,
   },
-  listContent: {
-    paddingBottom: 30,
-  },
-  emptyState: {
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    opacity: 0.6,
   },
-  noReports: {
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
     marginTop: 16,
     fontSize: 18,
     fontWeight: '500',
   },
-  noReportsSubtext: {
+  emptySubtext: {
     marginTop: 8,
     fontSize: 14,
+  },
+  listContent: {
+    paddingBottom: 20,
+  },
+  reportCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  reportInfo: {
+    flex: 1,
+    marginLeft: 16,
+    marginRight: 16,
+  },
+  reportTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  reportDate: {
+    fontSize: 12,
+    marginTop: 4,
+  },
+  reportActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
 });
 

@@ -6,6 +6,7 @@ import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 
 import HomeScreen from './screens/HomeScreen';
 import UploadScreen from './screens/UploadScreen';
+import ScanScreen from './screens/ScanScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -61,6 +62,7 @@ export default function App() {
           <Stack.Screen name="Result" component={ResultScreen} />
           <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
           <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+          <Stack.Screen name="Scan" component={ScanScreen} /> 
         </Stack.Navigator>
       </NavigationContainer>
     </ThemeProvider>

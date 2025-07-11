@@ -15,73 +15,111 @@ const { width, height } = Dimensions.get('window');
 const BACKGROUND_IMAGE = require('../assets/maize-field.jpg');
 const CAMEROON_MAP = require('../assets/cameroon-map.jpg');
 
-// Complete list of Cameroon regions with coordinates
+// Define Cameroon regions with their coordinates
 const CAMEROON_REGIONS = [
-  { name: "Adamawa", capital: "Ngaoundéré", lat: 7.3167, lon: 13.5833, color: "#4CAF50" },
-  { name: "Centre", capital: "Yaoundé", lat: 3.8667, lon: 11.5167, color: "#2196F3" },
-  { name: "East", capital: "Bertoua", lat: 4.5833, lon: 13.6833, color: "#FF9800" },
-  { name: "Far North", capital: "Maroua", lat: 10.5956, lon: 14.3247, color: "#9C27B0" },
-  { name: "Littoral", capital: "Douala", lat: 4.0500, lon: 9.7000, color: "#009688" },
-  { name: "North", capital: "Garoua", lat: 9.3000, lon: 13.4000, color: "#795548" },
-  { name: "Northwest", capital: "Bamenda", lat: 5.9333, lon: 10.1667, color: "#607D8B" },
-  { name: "South", capital: "Ebolowa", lat: 2.9167, lon: 11.1500, color: "#3F51B5" },
-  { name: "Southwest", capital: "Buea", lat: 4.1667, lon: 9.2333, color: "#FF5722" },
-  { name: "West", capital: "Bafoussam", lat: 5.4667, lon: 10.4167, color: "#E91E63" }
+  { name: 'Centre', lat: 3.8480, lon: 11.5021, capital: 'Yaounde' },
+  { name: 'Littoral', lat: 4.0511, lon: 9.7679, capital: 'Douala' },
+  { name: 'North-West', lat: 5.9636, lon: 10.1593, capital: 'Bamenda' },
+  { name: 'North', lat: 9.3041, lon: 13.3936, capital: 'Garoua' },
+  { name: 'Far North', lat: 10.5956, lon: 14.3247, capital: 'Maroua' },
+  { name: 'East', lat: 4.3547, lon: 13.6732, capital: 'Bertoua' },
+  { name: 'South', lat: 2.9167, lon: 10.8833, capital: 'Ebolowa' },
+  { name: 'South-West', lat: 4.1549, lon: 9.2317, capital: 'Buea' },
+  { name: 'Adamawa', lat: 6.5000, lon: 12.5000, capital: 'Ngaoundere' },
+  { name: 'West', lat: 5.4500, lon: 10.4167, capital: 'Bafoussam' }
 ];
 
 export default function HomeScreen({ navigation }) {
   const { theme } = useContext(ThemeContext);
   const [stats, setStats] = useState({
-    totalScans: 42,
-    healthy: 28,
-    warnings: 9,
-    critical: 5,
-    lastScan: new Date()
+    totalScans: 0,
+    healthy: 0,
+    warnings: 0,
+    critical: 0,
+    lastScan: null
   });
   const [weather, setWeather] = useState({
-    temp: 28,
-    condition: "Partly Cloudy",
-    advice: "Ideal conditions for maize growth",
-    icon: "cloud-sun"
+    temp: 0,
+    condition: "",
+    advice: "",
+    icon: "cloud"
   });
   const [currentRegion, setCurrentRegion] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // Health data visualization
   const healthData = [
     { label: 'Healthy', value: stats.healthy, color: '#4CAF50', icon: 'check-circle' },
     { label: 'Warnings', value: stats.warnings, color: '#FFC107', icon: 'exclamation-triangle' },
     { label: 'Critical', value: stats.critical, color: '#F44336', icon: 'times-circle' }
   ];
 
-  const getRegionByCoordinates = (lat, lon) => {
-    let nearestRegion = CAMEROON_REGIONS[0];
-    let minDistance = Number.MAX_VALUE;
-    
-    CAMEROON_REGIONS.forEach(region => {
-      const distance = Math.sqrt(
-        Math.pow(lat - region.lat, 2) + 
-        Math.pow(lon - region.lon, 2)
-      );
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestRegion = region;
-      }
-    });
-    
-    return nearestRegion;
+  // Function to calculate distance between two coordinates
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
   };
 
+  // Function to find nearest region based on coordinates
+  const getRegionByCoordinates = (lat, lon) => {
+    let nearest = CAMEROON_REGIONS[0];
+    let minDist = Number.MAX_VALUE;
+
+    CAMEROON_REGIONS.forEach(region => {
+      const distance = calculateDistance(lat, lon, region.lat, region.lon);
+      if (distance < minDist) {
+        minDist = distance;
+        nearest = region;
+      }
+    });
+
+    return nearest;
+  };
+
+  // Function to get current location
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        throw new Error('Location permission denied');
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const region = getRegionByCoordinates(
+        location.coords.latitude, 
+        location.coords.longitude
+      );
+
+      setCurrentRegion(region);
+      return region;
+    } catch (error) {
+      console.warn('Location error:', error.message);
+      // Fallback to Centre region if location fails
+      const fallbackRegion = CAMEROON_REGIONS.find(r => r.name === 'Centre');
+      setCurrentRegion(fallbackRegion);
+      return fallbackRegion;
+    }
+  };
+
+  // Function to fetch scan data from storage
   const fetchScanData = async () => {
     try {
-      // Simulated data - replace with your actual data fetching logic
       const reports = await AsyncStorage.getItem('maizeResults');
       if (reports) {
         const parsed = JSON.parse(reports);
         const healthyCount = parsed.filter(r => r.confidence < 40).length;
         const warningCount = parsed.filter(r => r.confidence >= 40 && r.confidence < 70).length;
         const criticalCount = parsed.filter(r => r.confidence >= 70).length;
-        
+
         setStats({
           totalScans: parsed.length,
           healthy: healthyCount,
@@ -89,61 +127,101 @@ export default function HomeScreen({ navigation }) {
           critical: criticalCount,
           lastScan: parsed.length > 0 ? new Date(parsed[0].timestamp) : null
         });
+      } else {
+        // Initialize with empty stats if no data exists
+        setStats({
+          totalScans: 0,
+          healthy: 0,
+          warnings: 0,
+          critical: 0,
+          lastScan: null
+        });
       }
     } catch (error) {
       console.error('Error loading scan data:', error);
+      Alert.alert('Data Error', 'Could not load scan history');
     }
   };
 
-  const fetchWeatherData = async (regionName) => {
+  // Function to fetch weather data
+  const fetchWeatherData = async (region) => {
     try {
-      // Simulated weather data - replace with your API call
-      const weatherConditions = [
-        { temp: 28, condition: "Sunny", advice: "Ideal conditions for maize", icon: "sun" },
-        { temp: 24, condition: "Partly Cloudy", advice: "Good growing weather", icon: "cloud-sun" },
-        { temp: 22, condition: "Rainy", advice: "Monitor for fungal diseases", icon: "cloud-rain" }
-      ];
+      // Use the region's capital city for weather data
+      const cityName = region.capital || region.name;
+      const response = await fetch(
+        `http://172.20.10.3:8000/api/weather?region=${encodeURIComponent(cityName)}`
+      );
       
-      const randomWeather = weatherConditions[Math.floor(Math.random() * weatherConditions.length)];
-      setWeather(randomWeather);
-      
+      const data = await response.json();
+
+      if (response.ok) {
+        setWeather({
+          temp: data.temp || 0,
+          condition: data.condition || 'Unknown',
+          advice: data.advice || 'No advice available',
+          icon: data.icon || 'cloud'
+        });
+      } else {
+        console.error("Weather API error:", data);
+        // Set default weather data instead of showing alert
+        setWeather({
+          temp: 25,
+          condition: 'Partly Cloudy',
+          advice: 'Good conditions for farming',
+          icon: 'cloud'
+        });
+      }
     } catch (error) {
       console.error('Weather fetch error:', error);
+      // Set default weather data on network error
+      setWeather({
+        temp: 25,
+        condition: 'Weather Unavailable',
+        advice: 'Check network connection',
+        icon: 'cloud'
+      });
     }
   };
 
+  // Initialize data on component mount
   useEffect(() => {
-    const initializeData = async () => {
+    const initialize = async () => {
       setLoading(true);
-      await fetchScanData();
       
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
-          const region = getRegionByCoordinates(
-            location.coords.latitude, 
-            location.coords.longitude
-          );
-          setCurrentRegion(region);
-          await fetchWeatherData(region.name);
+        // Load scan data first (this should always work)
+        await fetchScanData();
+        
+        // Get current region
+        const region = await getCurrentLocation();
+        
+        // Fetch weather data for the region
+        if (region) {
+          await fetchWeatherData(region);
         }
       } catch (error) {
-        console.error('Location error:', error);
-        // Default to Yaoundé if location fails
-        setCurrentRegion(CAMEROON_REGIONS.find(r => r.name === "Centre"));
-        await fetchWeatherData("Centre");
+        console.error('Initialization error:', error);
+        Alert.alert('Initialization Error', 'Some data could not be loaded');
+      } finally {
+        setLoading(false);
       }
-      
-      setLoading(false);
     };
 
-    initializeData();
+    initialize();
   }, []);
+
+  // Refresh data when screen is focused
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchScanData();
+    });
+
+    return unsubscribe;
+  }, [navigation]);
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, styles.loadingContainer]}>
+      <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4CAF50" />
         <Text style={styles.loadingText}>Loading your farm data...</Text>
       </SafeAreaView>
@@ -152,114 +230,86 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ImageBackground 
-        source={BACKGROUND_IMAGE} 
+      <ImageBackground
+        source={BACKGROUND_IMAGE}
         style={styles.backgroundImage}
         resizeMode="cover"
       >
         <LinearGradient
-          colors={['rgba(0,0,0,0.7)', 'rgba(0,0,0,0.4)']}
+          colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.9)']}
           style={styles.gradientOverlay}
         >
-          <ScrollView 
-            contentContainerStyle={styles.scrollContainer}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Header */}
-            <Animatable.View 
-              animation="fadeInDown" 
-              duration={800}
-              style={styles.header}
-            >
-              <Text style={styles.title}>MaizeGuard AI</Text>
-              <Text style={styles.subtitle}>Precision Agriculture Monitoring</Text>
-            </Animatable.View>
+          <ScrollView contentContainerStyle={styles.scrollContainer}>
 
-            {/* Current Location Card */}
-            {currentRegion && (
-              <Animatable.View 
-                animation="fadeInLeft" 
-                duration={800}
-                delay={200}
-                style={styles.locationCard}
-              >
-                <View style={styles.locationHeader}>
-                  <Ionicons name="location-sharp" size={24} color="#FFF" />
-                  <Text style={styles.locationTitle}>Current Region</Text>
-                </View>
-                <View style={styles.locationContent}>
-                  <Image 
-                    source={CAMEROON_MAP} 
-                    style={styles.mapImage}
-                    resizeMode="contain"
+            {/* Header */}
+            <View style={styles.header}>
+              <Text style={styles.title}>Maize Monitor</Text>
+              <Text style={styles.subtitle}>Your field insights at a glance</Text>
+            </View>
+
+            {/* Location Card */}
+            <View style={styles.locationCard}>
+              <View style={styles.locationHeader}>
+                <Ionicons name="location-outline" size={24} color="#FFF" />
+                <Text style={styles.locationTitle}>Current Region</Text>
+              </View>
+
+              <View style={styles.locationContent}>
+                <Image source={CAMEROON_MAP} style={styles.mapImage} />
+                <View style={styles.locationDetails}>
+                  <Text style={styles.regionName}>
+                    {currentRegion?.name || "Unknown"}
+                  </Text>
+                  <Text style={styles.regionCapital}>
+                    Capital: {currentRegion?.capital || "—"}
+                  </Text>
+                  <View
+                    style={[
+                      styles.regionIndicator,
+                      { backgroundColor: '#4CAF50' }
+                    ]}
                   />
-                  <View style={styles.locationDetails}>
-                    <Text style={styles.regionName}>{currentRegion.name}</Text>
-                    <Text style={styles.regionCapital}>{currentRegion.capital}</Text>
-                    <View style={[
-                      styles.regionIndicator, 
-                      { backgroundColor: currentRegion.color }
-                    ]} />
-                  </View>
                 </View>
-              </Animatable.View>
-            )}
+              </View>
+            </View>
 
             {/* Weather Card */}
-            <Animatable.View 
-              animation="fadeInRight" 
-              duration={800}
-              delay={200}
-              style={styles.weatherCard}
-            >
+            <View style={styles.weatherCard}>
               <View style={styles.weatherHeader}>
-                <FontAwesome5 
-                  name={weather.icon} 
-                  size={24} 
-                  color="#FFF" 
-                />
-                <Text style={styles.weatherTitle}>Weather Conditions</Text>
+                <MaterialIcons name="cloud" size={24} color="#FFF" />
+                <Text style={styles.weatherTitle}>Weather Update</Text>
               </View>
+
               <View style={styles.weatherContent}>
                 <Text style={styles.weatherTemp}>{weather.temp}°C</Text>
                 <Text style={styles.weatherCondition}>{weather.condition}</Text>
                 <Text style={styles.weatherAdvice}>{weather.advice}</Text>
               </View>
-            </Animatable.View>
+            </View>
 
-            {/* Health Overview Card */}
-            <Animatable.View 
-              animation="fadeInUp" 
-              duration={800}
-              delay={400}
-              style={styles.healthCard}
-            >
-              <Text style={styles.healthTitle}>Crop Health Overview</Text>
-              
-              {/* Summary Stats */}
+            {/* Health Summary Card */}
+            <View style={styles.healthCard}>
+              <Text style={styles.healthTitle}>Crop Health Summary</Text>
+
               <View style={styles.summaryContainer}>
                 <View style={styles.totalScans}>
                   <Text style={styles.totalScansValue}>{stats.totalScans}</Text>
                   <Text style={styles.totalScansLabel}>Total Scans</Text>
                 </View>
-                
+
                 <View style={styles.healthBars}>
                   {healthData.map((item, index) => (
                     <View key={index} style={styles.healthBarContainer}>
                       <View style={styles.healthBarLabel}>
-                        <FontAwesome5 
-                          name={item.icon} 
-                          size={16} 
-                          color={item.color} 
-                        />
+                        <FontAwesome5 name={item.icon} size={14} color={item.color} />
                         <Text style={styles.healthBarText}>{item.label}</Text>
                       </View>
                       <View style={styles.healthBarBackground}>
-                        <View 
+                        <View
                           style={[
-                            styles.healthBarFill, 
-                            { 
-                              width: `${(item.value / stats.totalScans) * 100}%`,
+                            styles.healthBarFill,
+                            {
+                              width: `${stats.totalScans > 0 ? (item.value / stats.totalScans) * 100 : 0}%`,
                               backgroundColor: item.color
                             }
                           ]}
@@ -273,49 +323,40 @@ export default function HomeScreen({ navigation }) {
 
               {stats.lastScan && (
                 <Text style={styles.lastScanText}>
-                  Last scan: {stats.lastScan.toLocaleDateString()} at{' '}
-                  {stats.lastScan.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  Last scan: {stats.lastScan.toLocaleString()}
                 </Text>
               )}
-            </Animatable.View>
+            </View>
 
-            {/* Quick Actions */}
-            <Animatable.View 
-              animation="fadeInUp" 
-              duration={800}
-              delay={600}
-              style={styles.actionsContainer}
-            >
-              <TouchableOpacity 
+            {/* Actions */}
+            <View style={styles.actionsContainer}>
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => navigation.navigate('Upload')}
               >
                 <LinearGradient
                   colors={['#4CAF50', '#2E7D32']}
                   style={styles.buttonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
                 >
-                  <MaterialIcons name="camera-alt" size={24} color="#FFF" />
+                  <MaterialIcons name="camera-alt" size={20} color="#FFF" />
                   <Text style={styles.actionButtonText}>New Scan</Text>
                 </LinearGradient>
               </TouchableOpacity>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.actionButton}
-                onPress={() => navigation.navigate('Reports')}
+                onPress={() => navigation.navigate('History')}
               >
                 <LinearGradient
-                  colors={['#2196F3', '#1565C0']}
+                  colors={['#2196F3', '#0D47A1']}
                   style={styles.buttonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
                 >
-                  <MaterialIcons name="history" size={24} color="#FFF" />
+                  <MaterialIcons name="history" size={20} color="#FFF" />
                   <Text style={styles.actionButtonText}>View History</Text>
                 </LinearGradient>
               </TouchableOpacity>
-            </Animatable.View>
+            </View>
+
           </ScrollView>
         </LinearGradient>
       </ImageBackground>
@@ -339,6 +380,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#4CAF50',
   },
+
   backgroundImage: {
     flex: 1,
     width: '100%',

@@ -9,7 +9,7 @@ import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
-const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'http://192.168.1.117:8000';
+const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'http://172.20.10.3:8000';
 const REGIONS = [
   { name: "Yaoundé", label: "Centre (Yaoundé)", lat: 3.9, lon: 11.5 },
   { name: "Douala", label: "Littoral (Douala)", lat: 4.05, lon: 9.7 },

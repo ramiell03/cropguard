@@ -1,307 +1,233 @@
-import React, { useState, useContext } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-import { MaterialIcons } from '@expo/vector-icons';
-import { ThemeContext } from '../theme/ThemeContext';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import axios from 'axios';
 
-export default function ScanScreen({ navigation }) {
-  const { theme } = useContext(ThemeContext);
-  const [image, setImage] = useState(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [progress, setProgress] = useState(0);
+const ScanScreen = ({ route, navigation }) => {
+  const [progress, setProgress] = useState('Initializing...');
+  const [progressPercent, setProgressPercent] = useState(0);
+  const { sceneInfo } = route.params;
 
-  const analyzeImage = async () => {
-    if (!image) return;
+  useEffect(() => {
+    const processAnalysis = async () => {
+  try {
+    setProgress('Selecting random satellite data...');
+    setProgressPercent(20);
 
-    setIsAnalyzing(true);
-    setProgress(0);
-    
-    const apiUrl = 'http://172.20.10.2:8000/analyze';
-    // ⚠️ replace <YOUR_IP>
+    // Get a random zip from backend
+    const randomFileResponse = await axios.get('http://172.20.10.3:8000/api/v1/get_random_zip');
+    const filePath = randomFileResponse.data.filePath;
 
-    try {
-      const fileInfo = await FileSystem.getInfoAsync(image);
-      const formData = new FormData();
+    setProgress('Preparing scene data...');
+    setProgressPercent(40);
 
-      formData.append('file', {
-        uri: fileInfo.uri,
-        name: 'maize.jpg',
-        type: 'image/jpeg',
-      });
+    // Use URLSearchParams instead of FormData
+    const params = new URLSearchParams();
+    params.append('sceneId', filePath);
+    params.append('threshold', '0.6');
+    params.append('generate_map', 'true');
 
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        body: formData,
+    const analysisResponse = await axios.post(
+      'http://172.20.10.3:8000/api/v1/detect_disease',
+      params.toString(),
+      {
         headers: {
-          'Content-Type': 'multipart/form-data',
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        timeout: 60000,
       }
+    );
 
-      const result = await response.json();
-      
-      // Simulate progress for demo (remove in production)
-      const simulateProgress = () => {
-        if (progress < 100) {
-          setProgress(prev => Math.min(prev + 10, 90));
-          setTimeout(simulateProgress, 300);
+        setProgress('Processing vegetation indices...');
+        setProgressPercent(80);
+
+        // Small delay to show progress
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        setProgress('Analysis complete!');
+        setProgressPercent(100);
+
+        // Navigate to results after a short delay
+        setTimeout(() => {
+          navigation.navigate('Result', {
+            analysisResult: analysisResponse.data,
+            sceneInfo: {
+              ...sceneInfo,
+              filePath: filePath
+            }
+          });
+        }, 1500);
+
+      } catch (error) {
+        console.error('Processing error:', error);
+        
+        let errorMessage = 'Failed to complete analysis';
+        if (error.response?.data?.detail) {
+          errorMessage = error.response.data.detail;
+        } else if (error.message) {
+          errorMessage = error.message;
         }
-      };
-      simulateProgress();
 
-      // After analysis completes
-      setTimeout(() => {
-        setProgress(100);
-        setIsAnalyzing(false);
-        navigation.navigate('Result', { 
-          imageUri: image, 
-          result: result.disease || 'Unknown',
-          confidence: result.confidence || 0,
-          advice: result.advice || 'No specific advice available',
-          ndvi: result.ndvi || null
-        });
-      }, 2000);
+        setProgress('Analysis failed. Please try again.');
+        setProgressPercent(0);
+        
+        Alert.alert(
+          'Processing Error',
+          errorMessage,
+          [
+            {
+              text: 'Try Again',
+              onPress: () => navigation.goBack()
+            },
+            {
+              text: 'Cancel',
+              onPress: () => navigation.navigate('Upload'),
+              style: 'cancel'
+            }
+          ]
+        );
+      }
+    };
 
-    } catch (error) {
-      setIsAnalyzing(false);
-      Alert.alert(
-        'Analysis Failed',
-        'Could not analyze the image. Please try again.',
-        [{ text: 'OK', onPress: () => console.log('OK Pressed') }]
-      );
-      console.error('Analysis error:', error);
-    }
-  };
-
-  const pickImage = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (permissionResult.granted === false) {
-      Alert.alert("Permission to access photos is required!");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
-    }
-  };
-
-  const takePhoto = async () => {
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-
-    if (permissionResult.granted === false) {
-      Alert.alert(
-        "Camera Permission Required",
-        "We need access to your camera to take photos of your maize field.",
-        [{ text: "OK" }]
-      );
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
-    }
-  };
+    processAnalysis();
+  }, [navigation, sceneInfo]);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <Text style={[styles.header, { color: theme.text }]}>🌽 Maize Field Analysis</Text>
-      <Text style={[styles.subheader, { color: theme.secondaryText }]}>
-        Upload or capture an image of your maize field for disease detection
-      </Text>
-
-      <View style={styles.buttonGroup}>
-        <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: theme.primary }]}
-          onPress={pickImage}
-        >
-          <MaterialIcons name="photo-library" size={24} color={theme.buttonText} />
-          <Text style={[styles.buttonText, { color: theme.buttonText }]}>Choose from Gallery</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: theme.primary }]}
-          onPress={takePhoto}
-        >
-          <MaterialIcons name="photo-camera" size={24} color={theme.buttonText} />
-          <Text style={[styles.buttonText, { color: theme.buttonText }]}>Take Photo</Text>
-        </TouchableOpacity>
+    <View style={styles.container}>
+      <Text style={styles.title}>Processing Satellite Analysis</Text>
+      
+      <View style={styles.sceneInfoContainer}>
+        <Text style={styles.sceneInfoTitle}>Scene Information</Text>
+        <Text style={styles.sceneInfoText}>ID: {sceneInfo.displayId}</Text>
+        <Text style={styles.sceneInfoText}>Date: {sceneInfo.date}</Text>
       </View>
 
-      {image && (
-        <View style={styles.imageContainer}>
-          <Image 
-            source={{ uri: image }} 
-            style={styles.image} 
-            resizeMode="contain"
-          />
-          
-          {isAnalyzing ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator 
-                size="large" 
-                color={theme.primary} 
-                style={styles.spinner}
-              />
-              <Text style={[styles.loadingText, { color: theme.text }]}>
-                Analyzing... {progress}%
-              </Text>
-              <View style={styles.progressBarContainer}>
-                <View 
-                  style={[
-                    styles.progressBar, 
-                    { 
-                      width: `${progress}%`,
-                      backgroundColor: theme.primary,
-                    }
-                  ]}
-                />
-              </View>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[styles.analyzeButton, { backgroundColor: theme.primary }]}
-              onPress={analyzeImage}
-            >
-              <MaterialIcons name="search" size={24} color={theme.buttonText} />
-              <Text style={[styles.analyzeButtonText, { color: theme.buttonText }]}>
-                Analyze Image
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+      <View style={styles.progressContainer}>
+        <ActivityIndicator size="large" color="#1a5f23" />
+        <Text style={styles.progressText}>{progress}</Text>
 
-      {!image && (
-        <View style={styles.tipContainer}>
-          <MaterialIcons name="lightbulb-outline" size={24} color={theme.primary} />
-          <Text style={[styles.tipText, { color: theme.secondaryText }]}>
-            Tip: Capture clear images of affected leaves for best results
-          </Text>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
         </View>
-      )}
+        <Text style={styles.progressPercent}>{progressPercent}%</Text>
+      </View>
+
+      <View style={styles.processingSteps}>
+        <Text style={styles.stepsTitle}>Processing Steps:</Text>
+        <Text style={[styles.stepText, progressPercent >= 20 && styles.stepCompleted]}>
+          • Selecting satellite data
+        </Text>
+        <Text style={[styles.stepText, progressPercent >= 40 && styles.stepCompleted]}>
+          • Preparing scene data
+        </Text>
+        <Text style={[styles.stepText, progressPercent >= 60 && styles.stepCompleted]}>
+          • Analyzing imagery
+        </Text>
+        <Text style={[styles.stepText, progressPercent >= 80 && styles.stepCompleted]}>
+          • Processing vegetation indices
+        </Text>
+        <Text style={[styles.stepText, progressPercent >= 100 && styles.stepCompleted]}>
+          • Generating results
+        </Text>
+      </View>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5fdf6',
     padding: 20,
-    paddingTop: 40,
   },
-  header: {
-    fontSize: 24,
+  title: {
+    fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 8,
+    color: '#1a5f23',
+    marginBottom: 20,
     textAlign: 'center',
   },
-  subheader: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 30,
-    paddingHorizontal: 20,
-  },
-  buttonGroup: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  sceneInfoContainer: {
+    backgroundColor: '#fff',
     borderRadius: 10,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    marginBottom: 15,
-    elevation: 2,
-  },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 10,
-  },
-  imageContainer: {
-    width: '100%',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  image: {
-    width: '100%',
-    height: 250,
-    borderRadius: 12,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  analyzeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    paddingVertical: 15,
-    paddingHorizontal: 25,
-    width: '100%',
-    elevation: 2,
-  },
-  analyzeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 10,
-  },
-  loadingContainer: {
-    width: '100%',
-    alignItems: 'center',
     padding: 15,
-  },
-  spinner: {
-    marginBottom: 15,
-  },
-  loadingText: {
-    fontSize: 16,
-    marginBottom: 10,
-  },
-  progressBarContainer: {
-    height: 8,
+    marginBottom: 30,
     width: '100%',
-    backgroundColor: '#E0E0E0',
-    borderRadius: 4,
-    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  sceneInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1a5f23',
+    marginBottom: 8,
+  },
+  sceneInfoText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  progressContainer: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  progressText: {
+    fontSize: 16,
+    color: '#333',
+    marginVertical: 20,
+    textAlign: 'center',
   },
   progressBar: {
+    width: '100%',
+    height: 10,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 5,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  progressFill: {
     height: '100%',
-    borderRadius: 4,
+    backgroundColor: '#2e8b57',
+    borderRadius: 5,
+    transition: 'width 0.3s ease',
   },
-  tipContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 40,
-    padding: 15,
-    borderRadius: 10,
-    backgroundColor: 'rgba(242, 201, 76, 0.1)',
-  },
-  tipText: {
+  progressPercent: {
     fontSize: 14,
-    marginLeft: 10,
-    flexShrink: 1,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  processingSteps: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  stepsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1a5f23',
+    marginBottom: 10,
+  },
+  stepText: {
+    fontSize: 14,
+    color: '#999',
+    marginBottom: 5,
+    paddingLeft: 10,
+  },
+  stepCompleted: {
+    color: '#2e8b57',
+    fontWeight: '500',
   },
 });
+
+export default ScanScreen;
